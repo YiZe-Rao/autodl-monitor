@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoDL 实例监控</title>
+<link rel="icon" href="data:,">
+<script src="/static/vendor/echarts.min.js"></script>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#253042;
+    --text:#e6edf3; --muted:#8b98a9; --accent:#3b82f6;
+    --cpu:#38bdf8; --gpu:#a78bfa; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  button{font:inherit;cursor:pointer;border:none;border-radius:8px}
+  input{font:inherit}
+
+  /* ---------- 登录页（仿 AutoDL 官网） ---------- */
+  #login-view{display:flex;flex-direction:column;min-height:100vh;background:#fff;color:#333;
+    font-family:"PingFang SC","Microsoft YaHei",Arial,sans-serif}
+  .notice{background:#ff8f1f;color:#fff;font-size:14px;text-align:center;padding:11px 16px}
+  .login-wrap{flex:1;display:flex;min-height:0}
+  .hero{position:relative;width:38%;min-width:360px;color:#fff;padding:34px 46px 28px;
+    display:flex;flex-direction:column;overflow:hidden;
+    background:radial-gradient(120% 80% at 18% 0%,#17253d 0%,#0b1220 46%,#05080f 100%)}
+  .hero::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(255,255,255,.05) 1px,transparent 1px);
+    background-size:64px 64px;
+    -webkit-mask-image:linear-gradient(to bottom,#000 0%,transparent 82%);
+    mask-image:linear-gradient(to bottom,#000 0%,transparent 82%)}
+  .brand{display:flex;align-items:center;gap:10px;font-size:22px;font-weight:600;letter-spacing:.5px;position:relative;z-index:1}
+  .hero h1{margin:auto 0 16px;font-size:38px;font-weight:700;letter-spacing:1px;position:relative;z-index:1}
+  .hero ul{list-style:none;padding:0;margin:0 0 12px;font-size:19px;line-height:2.05;color:#dbe3f0;position:relative;z-index:1}
+  .hero li::before{content:"·";margin-right:11px;color:#7e8ba1}
+  .hero .foot{margin-top:auto;text-align:center;color:#7f8ba0;font-size:13px;position:relative;z-index:1}
+  .form-side{flex:1;display:flex;justify-content:center;padding:13vh 32px 48px}
+  .form-box{width:100%;max-width:400px}
+  .tabs{display:flex;gap:46px;margin-bottom:36px}
+  .tab{font-size:22px;font-weight:700;color:#1a1a1a;padding-bottom:9px;cursor:pointer;
+    border-bottom:3px solid transparent}
+  .tab.active{color:#3760f4;border-bottom-color:#3760f4}
+  .tab.off{color:#9aa0aa;cursor:not-allowed}
+  .f-input{display:flex;height:40px;border:1px solid #d7dae0;border-radius:2px;
+    margin-bottom:22px;background:#fff;overflow:hidden}
+  .f-input:focus-within{border-color:#3760f4}
+  .f-prefix{display:flex;align-items:center;gap:9px;padding:0 15px;border-right:1px solid #d7dae0;
+    color:#606266;font-size:14px;user-select:none;white-space:nowrap}
+  .f-input input{flex:1;min-width:0;border:none;outline:none;padding:0 15px;font-size:14px;color:#333;background:transparent}
+  .f-input input::placeholder{color:#a8abb2}
+  .btn-login{width:100%;height:46px;background:#3760f4;color:#fff;font-size:16px;border-radius:2px;
+    border:1px solid #3760f4;font-weight:400}
+  .btn-login:hover{background:#2b50e2}
+  .btn-login:disabled{opacity:.65;cursor:default}
+  .links{display:flex;justify-content:space-between;align-items:center;margin-top:20px;font-size:14px}
+  .links a{color:#3760f4;cursor:pointer;text-decoration:none}
+  .links .hint{color:#9aa0aa;font-size:12px;text-align:right}
+  .err{color:#e34d59;font-size:13px;min-height:18px;margin-top:12px}
+  .btn-primary{width:100%;padding:11px;background:var(--accent);color:#fff;font-weight:600;margin-top:6px}
+  .btn-primary:hover{filter:brightness(1.1)}
+  .err{color:var(--err);font-size:13px;min-height:18px;margin-top:10px}
+
+  /* ---------- 面板 ---------- */
+  #dash-view{display:none;padding:16px 20px 28px;max-width:1400px;margin:0 auto}
+  header.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  header.top h1{font-size:17px;margin:0;font-weight:600;letter-spacing:.3px}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 10px;
+    border-radius:999px;background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+  .pill.ok .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .pill.warn .dot{background:var(--warn)}
+  .pill.err .dot{background:var(--err)}
+  .spacer{flex:1}
+  .btn{padding:7px 12px;background:var(--panel2);border:1px solid var(--line);color:var(--text);font-size:13px}
+  .btn:hover{border-color:var(--accent);color:#fff}
+  .btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+
+  .banner{display:none;margin-bottom:14px;padding:12px 14px;border-radius:10px;
+    background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.45);color:#fbbf24;font-size:13px}
+  .banner code{background:rgba(0,0,0,.35);padding:1px 6px;border-radius:4px;color:#fde68a}
+
+  .insts{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+  .inst{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;
+    background:var(--panel);border:1px solid var(--line);font-size:12px;cursor:pointer;
+    opacity:.55;transition:.15s}
+  .inst.on{opacity:1;border-color:#33507a}
+  .inst .nm{font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .inst .v{color:var(--muted);font-variant-numeric:tabular-nums}
+  .inst .v b.c{color:var(--cpu);font-weight:600}
+  .inst .v b.g{color:var(--gpu);font-weight:600}
+
+  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+
+  .charts{display:grid;grid-template-columns:1fr;gap:14px}
+  .chart-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px 4px}
+  .chart-box h3{margin:2px 0 0;font-size:13px;font-weight:600;color:var(--muted)}
+  .chart{height:300px;width:100%}
+
+  .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;
+    align-items:center;justify-content:center;padding:20px}
+  .modal.on{display:flex}
+  .modal .box{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    width:min(820px,100%);max-height:86vh;overflow:auto;padding:20px}
+  .modal h2{margin:0 0 12px;font-size:16px}
+  .modal pre{background:#0a0e14;border:1px solid var(--line);border-radius:8px;padding:12px;
+    overflow:auto;max-height:50vh;font-size:12px;line-height:1.45;color:#9fb3c8}
+  .row{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+  .row label{width:130px;color:var(--muted);font-size:13px}
+  .row input[type=text],.row input[type=number],.row input[type=password]{
+    flex:1;min-width:160px;padding:8px 10px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;color:var(--text)}
+  .hint{color:var(--muted);font-size:12px;margin:8px 0}
+  .close{float:right;background:transparent;color:var(--muted);font-size:20px;padding:0 6px}
+  .light-box{background:#fff;border:1px solid #e5e7eb;color:#333}
+  .spinner{width:26px;height:26px;margin:18px auto;border:3px solid #e5e7eb;
+    border-top-color:#3760f4;border-radius:50%;animation:spin .9s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @media(max-width:700px){ .chart{height:240px} #dash-view{padding:12px} }
+</style>
+</head>
+<body>
+
+<!-- ================= 登录 ================= -->
+<div id="login-view">
+  <div class="notice" id="notice">本地部署 · AutoDL 算力云实例监控面板</div>
+  <div class="login-wrap">
+    <aside class="hero">
+      <div class="brand">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+          <path d="M12 1.8 22 12 12 22.2 2 12Z" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M12 6.6 17.2 12 12 17.4 6.8 12Z" fill="#3f6bf5"/>
+        </svg>
+        AutoDL
+      </div>
+      <h1>AutoDL 算力监控</h1>
+      <ul>
+        <li>实时 CPU / GPU</li>
+        <li>多实例同屏</li>
+        <li>本地存储</li>
+      </ul>
+      <div class="foot">数据来自本机保存的 AutoDL 登录会话</div>
+    </aside>
+
+    <main class="form-side">
+      <div class="form-box">
+        <div class="tabs">
+          <span class="tab active">登录</span>
+          <span class="tab off" id="tab-reg">注册</span>
+        </div>
+        <form id="login-form">
+          <div class="f-input">
+            <span class="f-prefix">+86
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                <path d="M2 3.6 5 6.6 8 3.6" stroke="#909399" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <input id="lg-user" placeholder="请输入手机号" autocomplete="username" inputmode="numeric" required>
+          </div>
+          <div class="f-input">
+            <input id="lg-pass" type="password" placeholder="请输入密码" autocomplete="current-password" required>
+          </div>
+          <button class="btn-login" type="submit" id="lg-btn">登录</button>
+        </form>
+        <div class="links">
+          <a id="lnk-forgot">忘记密码?</a>
+          <span class="hint" id="lg-hint"></span>
+        </div>
+        <div class="err" id="lg-err"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ================= 面板 ================= -->
+<div id="dash-view">
+  <header class="top">
+    <h1>AutoDL 实例监控</h1>
+    <span class="pill" id="status-pill"><i class="dot"></i><span id="status-text">连接中…</span></span>
+    <span class="pill" id="count-pill">0 个实例</span>
+    <div class="spacer"></div>
+    <button class="btn" id="btn-refresh">立即采集</button>
+    <button class="btn" id="btn-debug">原始数据</button>
+    <button class="btn" id="btn-settings">设置</button>
+    <button class="btn" id="btn-logout">退出</button>
+  </header>
+
+  <div class="banner" id="banner"></div>
+  <div class="insts" id="insts"></div>
+
+  <div class="toolbar">
+    <button class="btn range" data-min="10">10 分钟</button>
+    <button class="btn range active" data-min="60">1 小时</button>
+    <button class="btn range" data-min="360">6 小时</button>
+    <button class="btn range" data-min="1440">24 小时</button>
+    <button class="btn range" data-min="10080">7 天</button>
+    <span style="color:var(--muted);font-size:12px" id="range-hint"></span>
+  </div>
+
+  <div class="charts">
+    <div class="chart-box"><h3>CPU 利用率</h3><div class="chart" id="chart-cpu"></div></div>
+    <div class="chart-box"><h3>GPU 利用率</h3><div class="chart" id="chart-gpu"></div></div>
+  </div>
+</div>
+
+<!-- ================= 滑块验证等待 ================= -->
+<div class="modal" id="modal-captcha">
+  <div class="box light-box" style="max-width:430px;text-align:center">
+    <h2 style="color:#1a1a1a">需要完成安全验证</h2>
+    <p class="hint" id="cap-msg" style="color:#606266">已打开登录窗口，请拖动滑块…</p>
+    <div class="spinner"></div>
+    <p class="hint" style="color:#9aa0aa;font-size:12px">
+      滑块由 AutoDL 强制校验，只能由本人完成；完成后本页会自动进入。
+    </p>
+    <button class="btn" id="cap-cancel" style="margin-top:8px">取消</button>
+  </div>
+</div>
+
+<!-- ================= 弹窗 ================= -->
+<div class="modal" id="modal-debug">
+  <div class="box">
+    <button class="close" data-close>×</button>
+    <h2>最近一次采集的原始数据</h2>
+    <p class="hint">若图表没有数据，把这页内容发给助手，即可定位是哪一列/哪个节点取值不对。</p>
+    <pre id="debug-pre">加载中…</pre>
+  </div>
+</div>
+
+<div class="modal" id="modal-settings">
+  <div class="box">
+    <button class="close" data-close>×</button>
+    <h2>采集设置</h2>
+    <div class="row"><label>采集间隔（秒）</label><input id="st-interval" type="number" min="5" max="3600"></div>
+    <div class="row"><label>CPU/GPU 所在列</label><input id="st-col" type="number" min="1" max="30"></div>
+    <div class="row"><label>实例名所在列</label><input id="st-name-col" type="number" min="1" max="30"></div>
+    <div class="row"><label>XPath</label><input id="st-xpath" type="text"></div>
+    <p class="hint">改完保存会立刻重新采集一次。XPath 只做记录/校准参考，实际取值按“列号”解析单元格文本。</p>
+    <div style="margin-top:14px"><button class="btn-primary" style="width:auto;padding:9px 18px" id="st-save">保存</button></div>
+    <hr style="border:none;border-top:1px solid var(--line);margin:20px 0">
+    <h2>修改登录密码</h2>
+    <div class="row"><label>原密码</label><input id="pw-old" type="password"></div>
+    <div class="row"><label>新密码</label><input id="pw-new" type="password"></div>
+    <div style="margin-top:10px"><button class="btn" id="pw-save">修改密码</button>
+      <span id="pw-msg" style="margin-left:10px;font-size:12px"></span></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = s => document.querySelector(s);
+  const LS = "autodl_monitor_token";
+  let token = localStorage.getItem(LS) || "";
+  let minutes = 60;
+  let selected = new Set();
+  let known = new Set();
+  let timer = null;
+  let charts = {};
+
+  // ---------------- 请求 ----------------
+  async function api(path, opts = {}) {
+    const headers = Object.assign({"Content-Type": "application/json"}, opts.headers || {});
+    if (token) headers.Authorization = "Bearer " + token;
+    const res = await fetch(path, Object.assign({}, opts, {headers}));
+    if (res.status === 401) { logout(); throw new Error("登录已过期"); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+    return data;
+  }
+
+  // ---------------- 登录 ----------------
+  async function loadSiteInfo() {
+    try {
+      const r = await fetch("/api/site-info");
+      const d = await r.json();
+      $("#notice").textContent = d.has_session
+        ? "本地部署 · 已有 AutoDL 会话，输入账密可继续"
+        : "本地部署 · 使用 AutoDL 账号登录，登录后自动开始采集";
+      $("#lg-hint").textContent = d.has_credentials ? "本机已保存账号，会自动重试" : "";
+    } catch (e) { /* ignore */ }
+  }
+
+  let capSid = null, capTimer = null;
+
+  function showCaptcha(d) {
+    capSid = d.sid;
+    $("#cap-msg").textContent = d.detail || "已打开登录窗口，请拖动滑块";
+    $("#modal-captcha").classList.add("on");
+    clearInterval(capTimer);
+    capTimer = setInterval(pollCaptcha, 2000);
+  }
+
+  async function pollCaptcha() {
+    if (!capSid) return;
+    try {
+      const r = await fetch("/api/login/status?sid=" + encodeURIComponent(capSid));
+      const d = await r.json();
+      if (d.status === "ok") {
+        clearInterval(capTimer); capTimer = null;
+        $("#modal-captcha").classList.remove("on");
+        token = d.token;
+        localStorage.setItem(LS, token);
+        showDash();
+      } else if (d.status === "failed") {
+        clearInterval(capTimer); capTimer = null;
+        $("#modal-captcha").classList.remove("on");
+        $("#lg-err").textContent = d.detail || "登录失败";
+      }
+    } catch (e) { /* 继续轮询 */ }
+  }
+
+  $("#cap-cancel").onclick = () => {
+    clearInterval(capTimer); capTimer = null; capSid = null;
+    $("#modal-captcha").classList.remove("on");
+  };
+
+  $("#login-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    const btn = $("#lg-btn");
+    $("#lg-err").textContent = "";
+    btn.disabled = true;
+    btn.textContent = "登录中…";
+    try {
+      const r = await fetch("/api/login", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({username: $("#lg-user").value.trim(), password: $("#lg-pass").value})
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 202 && d.sid) { showCaptcha(d); return; }
+      if (!r.ok) throw new Error(d.detail || "登录失败");
+      token = d.token;
+      localStorage.setItem(LS, token);
+      showDash();
+    } catch (err) {
+      $("#lg-err").textContent = err.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "登录";
+    }
+  });
+
+  $("#lnk-forgot").onclick = () => {
+    $("#lg-err").style.color = "#9aa0aa";
+    $("#lg-err").textContent = "这是 AutoDL 账号登录，忘记密码请到 autodl.com 找回";
+  };
+
+  $("#tab-reg").onclick = () => {
+    $("#lg-err").style.color = "#9aa0aa";
+    $("#lg-err").textContent = "请直接在 AutoDL 官网注册后再登录本站";
+  };
+
+  loadSiteInfo();
+
+  function showDash() {
+    $("#login-view").style.display = "none";
+    $("#dash-view").style.display = "block";
+    if (!charts.cpu) {
+      charts.cpu = echarts.init($("#chart-cpu"));
+      charts.gpu = echarts.init($("#chart-gpu"));
+      window.addEventListener("resize", () => {
+        charts.cpu.resize(); charts.gpu.resize();
+      });
+    }
+    refreshAll();
+    if (timer) clearInterval(timer);
+    timer = setInterval(refreshAll, 5000);
+  }
+
+  function logout() {
+    token = "";
+    localStorage.removeItem(LS);
+    if (timer) { clearInterval(timer); timer = null; }
+    $("#dash-view").style.display = "none";
+    $("#login-view").style.display = "flex";
+  }
+
+  $("#btn-logout").onclick = logout;
+
+  // ---------------- 状态 ----------------
+  function setStatus(cls, text) {
+    const p = $("#status-pill");
+    p.className = "pill " + cls;
+    $("#status-text").textContent = text;
+  }
+
+  function fmt(v) { return v == null ? "—" : (+v).toFixed(1) + "%"; }
+
+  async function refreshAll() {
+    let st;
+    try {
+      st = await api("/api/state");
+    } catch (e) { setStatus("err", "服务连接失败"); return; }
+
+    const s = st.scraper || {};
+    const now = Date.now() / 1000;
+    const age = s.last_ok_ts ? Math.round(now - s.last_ok_ts) : null;
+    if (s.status === "ok") setStatus("ok", `采集中 · 最近成功 ${age}s 前 · 每 ${s.interval}s`);
+    else if (s.status === "need_login") setStatus("warn", "需要重新登录 AutoDL");
+    else if (s.status === "starting") setStatus("", "启动中…");
+    else setStatus("err", s.message || "采集异常");
+
+    const banner = $("#banner");
+    if (s.status === "need_login") {
+      banner.style.display = "block";
+      banner.innerHTML = "AutoDL 登录已失效：请在电脑上运行 <code>login.bat</code>，在弹出的窗口里手动登录（若出现滑块请自己拖动），完成后会自动恢复采集。";
+    } else if (s.status === "empty") {
+      banner.style.display = "block";
+      banner.innerHTML = "已打开实例页但没解析到数据：点“原始数据”查看页面表格内容，发给我可快速校准。";
+    } else if (s.status === "error") {
+      banner.style.display = "block";
+      banner.innerHTML = "采集出错：" + (s.message || "").replace(/</g, "&lt;");
+    } else {
+      banner.style.display = "none";
+    }
+
+    const insts = st.instances || [];
+    $("#count-pill").textContent = insts.length + " 个实例";
+    renderInsts(insts);
+
+    const data = await api("/api/series?minutes=" + minutes);
+    renderCharts(data.rows || []);
+    $("#range-hint").textContent = `共 ${(data.rows || []).length} 个数据点（聚合粒度 ${data.bucket}s）`;
+  }
+
+  function renderInsts(list) {
+    const box = $("#insts");
+    box.innerHTML = "";
+    for (const it of list) {
+      if (!known.has(it.name)) { known.add(it.name); selected.add(it.name); }
+      const on = selected.has(it.name);
+      const el = document.createElement("div");
+      el.className = "inst" + (on ? " on" : "");
+      el.innerHTML = `<span class="nm" title="${it.name}">${it.name}</span>
+        <span class="v">CPU <b class="c">${fmt(it.last_cpu)}</b> · GPU <b class="g">${fmt(it.last_gpu)}</b></span>`;
+      el.onclick = () => {
+        if (selected.has(it.name)) selected.delete(it.name); else selected.add(it.name);
+        el.classList.toggle("on");
+        refreshAll();
+      };
+      box.appendChild(el);
+    }
+    if (!list.length) box.innerHTML = '<span style="color:var(--muted);font-size:13px">还没有实例数据，等待首次采集…</span>';
+  }
+
+  const COLORS = ["#38bdf8","#a78bfa","#34d399","#fbbf24","#f472b6","#60a5fa","#fb923c","#4ade80","#e879f9","#22d3ee"];
+
+  function renderCharts(rows) {
+    for (const kind of ["cpu", "gpu"]) {
+      const map = new Map();
+      for (const r of rows) {
+        if (!selected.has(r.instance)) continue;
+        const v = r[kind];
+        if (v == null) continue;
+        if (!map.has(r.instance)) map.set(r.instance, []);
+        map.get(r.instance).push([r.bucket * 1000, Math.round(v * 10) / 10]);
+      }
+      const series = [];
+      let i = 0;
+      for (const [name, data] of map) {
+        series.push({
+          name, type: "line", showSymbol: false, smooth: 0.25, connectNulls: false,
+          lineStyle: {width: 2, color: COLORS[i % COLORS.length]},
+          itemStyle: {color: COLORS[i % COLORS.length]},
+          areaStyle: {opacity: 0.10, color: COLORS[i % COLORS.length]},
+          emphasis: {focus: "series"},
+          data
+        });
+        i++;
+      }
+      const base = {
+        backgroundColor: "transparent",
+        grid: {left: 48, right: 18, top: 34, bottom: 30},
+        legend: {top: 0, type: "scroll", textStyle: {color: "#8b98a9", fontSize: 11}, icon: "roundRect", itemWidth: 10, itemHeight: 4},
+        tooltip: {
+          trigger: "axis", backgroundColor: "rgba(22,27,34,.95)", borderColor: "#253042",
+          textStyle: {color: "#e6edf3", fontSize: 12},
+          valueFormatter: v => (v == null ? "—" : v + "%")
+        },
+        xAxis: {
+          type: "time", axisLine: {lineStyle: {color: "#253042"}},
+          axisLabel: {color: "#8b98a9", fontSize: 11}, splitLine: {show: false}
+        },
+        yAxis: {
+          type: "value", min: 0, max: 100,
+          axisLabel: {color: "#8b98a9", fontSize: 11, formatter: "{value}%"},
+          splitLine: {lineStyle: {color: "#1c2330"}}
+        },
+        dataZoom: [{type: "inside"}],
+        series
+      };
+      charts[kind].setOption(base, true);
+      charts[kind].resize();
+    }
+  }
+
+  // ---------------- 控件 ----------------
+  document.querySelectorAll(".range").forEach(b => {
+    b.onclick = () => {
+      document.querySelectorAll(".range").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+      minutes = +b.dataset.min;
+      refreshAll();
+    };
+  });
+
+  $("#btn-refresh").onclick = async () => { await api("/api/scrape", {method: "POST"}); };
+
+  // 弹窗
+  document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => {
+    document.querySelectorAll(".modal").forEach(m => m.classList.remove("on"));
+  });
+  document.querySelectorAll(".modal").forEach(m => m.addEventListener("click", e => {
+    if (e.target === m) m.classList.remove("on");
+  }));
+
+  $("#btn-debug").onclick = async () => {
+    $("#debug-pre").textContent = "加载中…";
+    $("#modal-debug").classList.add("on");
+    try {
+      const d = await api("/api/debug");
+      $("#debug-pre").textContent = JSON.stringify(d, null, 2);
+    } catch (e) { $("#debug-pre").textContent = "获取失败：" + e.message; }
+  };
+
+  $("#btn-settings").onclick = async () => {
+    $("#modal-settings").classList.add("on");
+    try {
+      const d = await api("/api/debug");
+      const c = d.config || {};
+      $("#st-interval").value = c.interval_sec || 15;
+      $("#st-col").value = c.cpu_gpu_col || 5;
+      $("#st-name-col").value = c.name_col || 1;
+      $("#st-xpath").value = c.xpath || "";
+    } catch (e) { /* ignore */ }
+  };
+
+  $("#st-save").onclick = async () => {
+    try {
+      await api("/api/settings", {
+        method: "POST",
+        body: JSON.stringify({
+          interval_sec: +$("#st-interval").value,
+          cpu_gpu_col: +$("#st-col").value,
+          name_col: +$("#st-name-col").value,
+          xpath: $("#st-xpath").value
+        })
+      });
+      $("#modal-settings").classList.remove("on");
+      refreshAll();
+    } catch (e) { alert("保存失败：" + e.message); }
+  };
+
+  $("#pw-save").onclick = async () => {
+    $("#pw-msg").textContent = "";
+    try {
+      await api("/api/password", {
+        method: "POST",
+        body: JSON.stringify({old_password: $("#pw-old").value, new_password: $("#pw-new").value})
+      });
+      $("#pw-msg").textContent = "已修改";
+      $("#pw-msg").style.color = "var(--ok)";
+    } catch (e) {
+      $("#pw-msg").textContent = e.message;
+      $("#pw-msg").style.color = "var(--err)";
+    }
+  };
+
+  // 启动
+  if (token) showDash();
+})();
+</script>
+</body>
+</html>
